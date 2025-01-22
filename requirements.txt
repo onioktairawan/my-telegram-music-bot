@@ -1,0 +1,3 @@
+python-telegram-bot==20.0
+yt-dlp==2023.01.17
+youtubesearchpython==1.6.2
