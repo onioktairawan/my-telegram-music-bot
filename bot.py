@@ -1,99 +1,94 @@
-import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
-import yt_dlp
-import os
-from youtubesearchpython import VideosSearch
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from newsapi import NewsApiClient
+import logging
 
-# Setup logging
+# Konfigurasi API
+NEWS_API_KEY = '7da3292df394438fab6518ff0cd8d96c'  # API key NewsAPI
+TELEGRAM_BOT_TOKEN = '7500495219:AAGiGwm4yFkH79jE_kpxTdHg4d2M8DKfKzE'  # Token Telegram Bot
+
+# Setup logging untuk debug
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Fungsi untuk mencari video di YouTube berdasarkan judul
-def search_youtube(query):
-    search = VideosSearch(query, limit=1)
-    results = search.result()
-    if results['result']:
-        return results['result'][0]['link']  # Mengambil URL video pertama
+# Inisialisasi NewsApiClient
+newsapi = NewsApiClient(api_key=NEWS_API_KEY)
+
+# Variabel untuk menyimpan chat_id grup
+group_chat_id = None
+
+# Fungsi untuk mendapatkan berita Forex dan cryptocurrency
+def get_news():
+    # Mengambil berita terkait forex dan cryptocurrency
+    top_headlines = newsapi.get_top_headlines(q='forex OR cryptocurrency',
+                                              language='en',
+                                              page_size=5)  # Mengambil 5 berita terbaru
+
+    # Memeriksa apakah ada artikel
+    if top_headlines['status'] == 'ok' and top_headlines['totalResults'] > 0:
+        articles = top_headlines['articles']
+        news_list = []
+        for article in articles:
+            title = article['title']
+            url = article['url']
+            news_list.append(f"{title}\n{url}")
+        
+        return "\n\n".join(news_list)  # Mengembalikan berita dalam format teks
     else:
-        return None
+        return "Tidak ada berita terbaru saat ini."
 
-# Fungsi untuk mendownload video/audio dari YouTube
-def download_media(url, is_audio=True):
-    # Membuat direktori 'downloads' jika belum ada
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
-    
-    ydl_opts = {
-        'format': 'bestaudio/best' if is_audio else 'bestvideo+bestaudio',
-        'extractaudio': is_audio,  # Ekstrak audio saja
-        'audioquality': 1,         # Kualitas terbaik
-        'outtmpl': 'downloads/%(id)s.%(ext)s',  # Lokasi penyimpanan file
-        'postprocessors': [{
-            'key': 'FFmpegAudioConvertor',
-            'preferredcodec': 'mp3' if is_audio else 'mp4',  # Konversi ke MP3 atau MP4
-            'preferredquality': '192',
-        }],
-    }
+# Fungsi untuk menangani update (termasuk ketika bot ditambahkan ke grup)
+async def handle_updates(update, context):
+    global group_chat_id
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=True)
-        file_path = os.path.join('downloads', f"{info_dict['id']}.mp3" if is_audio else f"{info_dict['id']}.mp4")
-        logger.info(f"Downloaded file: {file_path}")
-        return file_path
+    # Jika pesan datang dari grup
+    if update.message.chat.type in ['group', 'supergroup']:
+        # Cek apakah bot ditambahkan ke grup (join)
+        if update.message.new_chat_members:
+            for member in update.message.new_chat_members:
+                if member.id == context.bot.id:  # Jika bot yang baru saja ditambahkan
+                    group_chat_id = update.message.chat.id  # Simpan chat_id grup
+                    await context.bot.send_message(chat_id=group_chat_id, text="Bot berhasil bergabung dengan grup!")
 
-# Fungsi untuk memulai percakapan
-async def start(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text('Send me a YouTube link or a song title, and I\'ll send you the full video or audio!')
+# Fungsi untuk mengirimkan berita otomatis ke grup
+async def send_news_to_group(context):
+    if group_chat_id:
+        news = get_news()  # Ambil berita terbaru
+        await context.bot.send_message(chat_id=group_chat_id, text=news)  # Kirim berita ke grup
+    else:
+        print("Grup tidak ditemukan!")
 
-# Fungsi untuk perintah /play
-async def play_music(update: Update, context: CallbackContext) -> None:
-    if len(context.args) == 0:
-        await update.message.reply_text('Please provide a song title to play.')
-        return
+# Fungsi untuk perintah /berita
+async def berita(update: Update, context):
+    news = get_news()  # Ambil berita terbaru
+    await update.message.reply_text(news)  # Kirimkan berita langsung ke pengguna
 
-    song_title = ' '.join(context.args)  # Gabungkan argumen menjadi satu string
-    url = search_youtube(song_title)
-    if not url:
-        await update.message.reply_text("Sorry, I couldn't find that song.")
-        return
+# Fungsi untuk memulai bot
+async def start(update, context):
+    await update.message.reply_text(
+        "Halo! Saya bot berita ekonomi. Ketik /berita untuk mendapatkan berita terbaru tentang forex dan cryptocurrency."
+    )
 
-    await update.message.reply_text("Downloading the media...")
-    try:
-        # Tentukan apakah kita ingin mendownload audio saja atau video lengkap
-        is_audio = 'audio' in song_title
-        file_path = download_media(url, is_audio)
-
-        # Periksa apakah file ada sebelum mengirimnya
-        if os.path.exists(file_path):
-            logger.info(f"Sending file: {file_path}")
-            # Kirim file
-            if is_audio:
-                await update.message.reply_audio(open(file_path, 'rb'))
-            else:
-                await update.message.reply_video(open(file_path, 'rb'))
-            os.remove(file_path)  # Hapus file setelah dikirim
-        else:
-            await update.message.reply_text("Error: File not found.")
-    except Exception as e:
-        await update.message.reply_text("Error downloading or sending the media.")
-        logger.error(e)
-
+# Setup untuk bot Telegram
 def main():
-    # Ganti 'YOUR_TOKEN' dengan token botmu
-    application = Application.builder().token("7715591819:AAH3-WTeOy0fygSxoq7dO8nlPJ7JgwPnOnU").build()
-    
-    # Handler untuk perintah /start
-    application.add_handler(CommandHandler("start", start))
-    
-    # Handler untuk perintah /play
-    application.add_handler(CommandHandler("play", play_music))
-    
-    # Handler untuk menangani pesan teks (URL YouTube atau judul lagu)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_music))
-    
-    # Jalankan bot
+    # Inisialisasi Application (ganti dengan versi terbaru)
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Handler untuk command /start
+    application.add_handler(CommandHandler('start', start))
+
+    # Handler untuk command /berita
+    application.add_handler(CommandHandler('berita', berita))  # Ini yang baru ditambahkan
+
+    # Handler untuk menerima semua pesan dan memproses update
+    application.add_handler(MessageHandler(filters.ALL, handle_updates))
+
+    # Set interval pengiriman berita otomatis (misalnya setiap 1 jam)
+    job_queue = application.job_queue
+    job_queue.run_repeating(send_news_to_group, interval=3600, first=0)
+
+    # Mulai polling untuk bot (tanpa menggunakan asyncio.run)
     application.run_polling()
 
 if __name__ == '__main__':
