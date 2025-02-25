@@ -1,144 +1,82 @@
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from newsapi import NewsApiClient
 import logging
 import asyncio
-import logging
-from telethon import TelegramClient, events
-from telegram import Bot
-from telegram.error import TelegramError
+import os
+from telethon import TelegramClient
+from dotenv import load_dotenv
 
-# Konfigurasi API
-NEWS_API_KEY = '7da3292df394438fab6518ff0cd8d96c'  # API key NewsAPI
-TELEGRAM_BOT_TOKEN = '7500495219:AAGiGwm4yFkH79jE_kpxTdHg4d2M8DKfKzE'  # Token Telegram Bot
+# 🔹 Load konfigurasi dari .env
+load_dotenv()
 
-# Setup logging untuk debug
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
-logger = logging.getLogger(__name__)
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
 
-# Inisialisasi NewsApiClient
-newsapi = NewsApiClient(api_key=NEWS_API_KEY)
+SOURCE_CHANNELS = list(map(int, os.getenv("SOURCE_CHANNELS").split(",")))
+TARGET_CHATS = list(map(int, os.getenv("TARGET_CHATS").split(",")))
 
-# Variabel untuk menyimpan chat_id grup
-group_chat_id = None
-
-# Fungsi untuk mendapatkan berita Forex dan cryptocurrency
-def get_news():
-    # Mengambil berita terkait forex dan cryptocurrency
-    top_headlines = newsapi.get_top_headlines(q='forex OR cryptocurrency',
-                                              language='en',
-                                              page_size=5)  # Mengambil 5 berita terbaru
-
-    # Memeriksa apakah ada artikel
-    if top_headlines['status'] == 'ok' and top_headlines['totalResults'] > 0:
-        articles = top_headlines['articles']
-        news_list = []
-        for article in articles:
-            title = article['title']
-            url = article['url']
-            news_list.append(f"{title}\n{url}")
-        
-        return "\n\n".join(news_list)  # Mengembalikan berita dalam format teks
-    else:
-        return "Tidak ada berita terbaru saat ini."
-
-# Fungsi untuk menangani update (termasuk ketika bot ditambahkan ke grup)
-async def handle_updates(update, context):
-    global group_chat_id
-
-    # Jika pesan datang dari grup
-    if update.message.chat.type in ['group', 'supergroup']:
-        # Cek apakah bot ditambahkan ke grup (join)
-        if update.message.new_chat_members:
-            for member in update.message.new_chat_members:
-                if member.id == context.bot.id:  # Jika bot yang baru saja ditambahkan
-                    group_chat_id = update.message.chat.id  # Simpan chat_id grup
-                    await context.bot.send_message(chat_id=group_chat_id, text="Bot berhasil bergabung dengan grup!")
-
-# Fungsi untuk mengirimkan berita otomatis ke grup
-async def send_news_to_group(context):
-    if group_chat_id:
-        news = get_news()  # Ambil berita terbaru
-        await context.bot.send_message(chat_id=group_chat_id, text=news)  # Kirim berita ke grup
-    else:
-        print("Grup tidak ditemukan!")
-
-# Fungsi untuk perintah /berita
-async def berita(update: Update, context):
-    news = get_news()  # Ambil berita terbaru
-    await update.message.reply_text(news)  # Kirimkan berita langsung ke pengguna
-
-# Fungsi untuk memulai bot
-async def start(update, context):
-    await update.message.reply_text(
-        "Halo! Saya bot berita ekonomi. Ketik /berita untuk mendapatkan berita terbaru tentang forex dan cryptocurrency."
-    )
-
-# Setup untuk bot Telegram
-def main():
-    # Inisialisasi Application (ganti dengan versi terbaru)
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Handler untuk command /start
-    application.add_handler(CommandHandler('start', start))
-
-    # Handler untuk command /berita
-    application.add_handler(CommandHandler('berita', berita))  # Ini yang baru ditambahkan
-
-    # Handler untuk menerima semua pesan dan memproses update
-    application.add_handler(MessageHandler(filters.ALL, handle_updates))
-
-    # Set interval pengiriman berita otomatis (misalnya setiap 1 jam)
-    job_queue = application.job_queue
-    job_queue.run_repeating(send_news_to_group, interval=3600, first=0)
-
-    # Mulai polling untuk bot (tanpa menggunakan asyncio.run)
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
-
-# Konfigurasi logging
+# 🔹 Konfigurasi Logging
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
+    ]
 )
 
-# API ID & API HASH dari my.telegram.org
-API_ID = 23581804  # Ganti dengan API ID-mu
-API_HASH = "49fd7d9ac9aecb487c343a0c1156f8d2"  # Ganti dengan API HASH-mu
-
-# Token bot dari BotFather (PASTIKAN TOKEN BARU)
-BOT_TOKEN = "7783954036:AAGWsD-9G3BfnSPysEAKqN30OfiKonfTUV4"
-
-# ID Channel sumber (format -100XXXXXXXXXX)
-CHANNEL_SOURCE_ID = -1002156702383  # ID channel sumber
-
-# ID Grup atau Channel tujuan (format -100XXXXXXXXXX)
-TARGET_CHAT_ID = -1002325511325  # ID grup/channel tujuan
-
-# Inisialisasi Telethon Client
+# 🔹 Buat sesi Telethon tanpa bot_token (akun pribadi)
 client = TelegramClient("session_name", API_ID, API_HASH)
-bot = Bot(token=BOT_TOKEN)
 
-@client.on(events.NewMessage(chats=CHANNEL_SOURCE_ID))
-async def forward_message(event):
-    """ Mengambil pesan dari channel sumber dan meneruskannya ke tujuan """
-    message = event.message.text
-    if message:
-        logging.info(f"Pesan diterima dari {CHANNEL_SOURCE_ID}: {message}")
-        try:
-            await bot.send_message(chat_id=TARGET_CHAT_ID, text=message)
-            logging.info(f"✅ Pesan berhasil diteruskan ke {TARGET_CHAT_ID}")
-        except TelegramError as e:
-            logging.error(f"❌ Gagal mengirim pesan ke {TARGET_CHAT_ID}: {e}")
+# 🔹 Variabel untuk menyimpan ID pesan terakhir yang sudah diteruskan
+last_message_ids = {channel_id: 0 for channel_id in SOURCE_CHANNELS}
 
-async def main():
-    """Menjalankan bot"""
-    logging.info("🚀 Bot berjalan, menunggu pesan baru...")
-    await client.start()
-    await client.run_until_disconnected()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+async def check_new_messages():
+    """Scrape pesan baru dari channel sumber dan kirim ke grup tujuan."""
+    while True:
+        for channel_id in SOURCE_CHANNELS:
+            try:
+                # 🔹 Ambil 5 pesan terbaru
+                messages = await client.get_messages(channel_id, limit=5)
+                for message in reversed(messages):
+                    if message.id > last_message_ids[channel_id]:  # Cek apakah pesan baru
+                        log_message = f"📩 Pesan baru dari {channel_id}:\n"
+
+                        if message.text:
+                            log_message += f"📝 {message.text[:100]}...\n"
+
+                        if message.media:
+                            log_message += f"📷 Media: {type(message.media).__name__}\n"
+
+                        logging.info(log_message)
+
+                        for chat_id in TARGET_CHATS:
+                            try:
+                                if message.media:
+                                    await client.send_file(chat_id, message.media, caption=message.text[:1024])
+                                else:
+                                    await client.send_message(chat_id, message.text[:4096])
+
+                                logging.info(f"✅ Pesan diteruskan ke {chat_id}")
+
+                            except Exception as e:
+                                logging.error(f"❌ Gagal meneruskan pesan ke {chat_id}: {e}")
+
+                        # 🔹 Simpan ID pesan terakhir yang sudah diteruskan
+                        last_message_ids[channel_id] = message.id
+
+                await asyncio.sleep(5)  # 🔹 Delay antar pengecekan biar gak spam
+
+            except Exception as e:
+                logging.error(f"❌ Error saat membaca channel {channel_id}: {e}")
+
+        await asyncio.sleep(10)  # 🔹 Tunggu sebelum mengecek ulang
+
+
+async def start_bot():
+    """Menjalankan bot dalam loop."""
+    logging.info("🚀 Bot berjalan, mulai scrape pesan...")
+    await check_new_messages()
+
+
+with client:
+    client.loop.run_until_complete(start_bot())
