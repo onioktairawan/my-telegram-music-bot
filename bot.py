@@ -1,4 +1,4 @@
-from telethon import TelegramClient, events, functions
+from telethon import TelegramClient, events, functions, types
 import os
 from dotenv import load_dotenv
 
@@ -28,16 +28,20 @@ async def clone_profile(event):
             await event.reply("❌ Tolong reply pesan atau masukkan username/ID!")
             return
 
+        # Clone foto profil
         photos = await client.get_profile_photos(user)
         if photos:
             file = await client.download_media(photos[0], "profile.jpg")
             await client(functions.photos.UploadProfilePhotoRequest(file=await client.upload_file(file)))
 
-        about = user.about if user.about else "Tidak ada bio."
-        await client(functions.account.UpdateProfileRequest(about=about))
+        # Clone bio jika ada
+        about = getattr(user, "about", "Tidak ada bio.")
+        if about:
+            await client(functions.account.UpdateProfileRequest(about=about))
 
+        # Clone nama depan & belakang
         first_name = user.first_name if user.first_name else ""
-        last_name = user.last_name if user.last_name else ""
+        last_name = user.last_name if hasattr(user, "last_name") and user.last_name else ""
         await client(functions.account.UpdateProfileRequest(first_name=first_name, last_name=last_name))
 
         await event.reply(f"✅ Berhasil menyalin profil dari {user.first_name} ({user.id})\n⚠️ *Username tidak bisa di-clone karena bersifat unik!*")
