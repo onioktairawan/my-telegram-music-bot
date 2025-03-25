@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from dotenv import load_dotenv
-from telethon import TelegramClient, events, functions, types
+from telethon import TelegramClient, events, functions
 
 # Load konfigurasi dari .env
 load_dotenv()
@@ -11,10 +11,8 @@ API_ID = int(os.getenv("TELEGRAM_API_ID"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 PHONE_NUMBER = os.getenv("TELEGRAM_PHONE")
 
-# Gunakan session agar tidak perlu login ulang
 client = TelegramClient("session", API_ID, API_HASH)
 
-# File untuk menyimpan data profil asli sebelum cloning
 PROFILE_BACKUP_FILE = "profile_backup.json"
 
 # Konfigurasi logging
@@ -58,8 +56,11 @@ async def clone_profile(event):
 
         logging.info(f"📥 Menyalin profil dari: {user.first_name} ({user.id})")
 
-        # Simpan profil lama sebelum cloning
-        old_profile = await client(functions.users.GetFullUserRequest("me"))
+        # Perbaikan: Ambil profil lengkap dengan `UserFull`
+        full_user = await client(functions.users.GetFullUserRequest(user.id))
+
+        # Simpan data profil lama
+        old_profile = full_user  # Simpan objek UserFull
         old_first_name = old_profile.user.first_name or ""
         old_last_name = old_profile.user.last_name or ""
         old_bio = old_profile.about or ""
@@ -84,7 +85,7 @@ async def clone_profile(event):
             logging.warning("⚠️ Pengguna tidak memiliki foto profil.")
 
         # Clone bio jika ada
-        about = getattr(user, "about", None)
+        about = getattr(full_user, "about", None)  # Perbaikan akses bio
         if about:
             await client(functions.account.UpdateProfileRequest(about=about))
             logging.info("✅ Bio berhasil disalin.")
