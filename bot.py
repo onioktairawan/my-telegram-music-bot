@@ -1,3 +1,4 @@
+from flask import Flask, request
 from telethon.sync import TelegramClient, events
 import requests
 import os
@@ -11,14 +12,13 @@ load_dotenv()
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 PHONE_NUMBER = os.getenv("PHONE_NUMBER")
+TELEGRAM_GROUP_IDS = list(map(int, os.getenv("TELEGRAM_GROUP_IDS").split(",")))
+TELEGRAM_GROUP_ID_REPLY = int(os.getenv("TELEGRAM_GROUP_ID_REPLY"))
 
 # 🔹 Konfigurasi WhatsApp UltraMSG
 WHATSAPP_INSTANCE_ID = os.getenv("WHATSAPP_INSTANCE_ID")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 WHATSAPP_NUMBERS = os.getenv("WHATSAPP_NUMBERS").split(",")
-
-# 🔹 ID Grup yang Akan Dipantau
-TELEGRAM_GROUP_IDS = list(map(int, os.getenv("TELEGRAM_GROUP_IDS").split(",")))
 
 # 🔹 File log
 LOG_FILE = "log.txt"
@@ -61,7 +61,7 @@ def send_whatsapp_media(media_url, caption=""):
 # 🔹 Jalankan Telegram Client
 client = TelegramClient(PHONE_NUMBER, API_ID, API_HASH)
 
-# 🔹 Menangkap pesan dari grup tertentu berdasarkan ID
+# 🔹 Menangkap pesan dari grup Telegram untuk diteruskan ke WhatsApp
 @client.on(events.NewMessage(chats=TELEGRAM_GROUP_IDS))
 async def forward_to_whatsapp(event):
     sender = await event.get_sender()
@@ -91,6 +91,35 @@ async def forward_to_whatsapp(event):
             else:
                 write_log(f"❌ Gagal mengupload media dari {sender_info}")
 
-client.start()
-write_log("🚀 Bot Telegram ke WhatsApp dimulai...")
-client.run_until_disconnected()
+# 🔹 Flask Webhook untuk menangkap balasan WhatsApp & mengirim ke Telegram
+app = Flask(__name__)
+
+@app.route("/webhook", methods=["POST"])
+def receive_whatsapp_message():
+    data = request.json
+
+    # 🔹 Ambil pesan dari WhatsApp
+    sender = data.get("from")
+    message = data.get("body")
+
+    if sender and message:
+        # 🔹 Format pesan yang dikirim ke Telegram
+        telegram_message = f"💬 Balasan dari WhatsApp ({sender}):\n{message}"
+
+        # 🔹 Kirim pesan ke grup Telegram
+        with client:
+            client.loop.run_until_complete(client.send_message(TELEGRAM_GROUP_ID_REPLY, telegram_message))
+
+        write_log(f"📩 Balasan dari WhatsApp ({sender}): \"{message}\" dikirim ke Telegram")
+        return {"status": "success", "message": "Pesan diterima dan dikirim ke Telegram"}, 200
+
+    return {"status": "error", "message": "Data tidak valid"}, 400
+
+if __name__ == "__main__":
+    client.start()
+    write_log("🚀 Bot Telegram ↔ WhatsApp dimulai...")
+
+    # 🔹 Jalankan Flask Webhook untuk menangkap balasan WhatsApp
+    app.run(host="0.0.0.0", port=5000)
+
+    client.run_until_disconnected()
