@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from dotenv import load_dotenv
-from telethon import TelegramClient, events, functions
+from telethon import TelegramClient, events, functions, types
 
 # Load konfigurasi dari .env
 load_dotenv()
@@ -15,64 +15,57 @@ client = TelegramClient("session", API_ID, API_HASH)
 
 PROFILE_BACKUP_FILE = "profile_backup.json"
 
-# Konfigurasi logging
+# Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def save_backup(data):
-    """Menyimpan data profil lama sebelum cloning."""
+    """Simpan data profil lama sebelum cloning."""
     try:
         with open(PROFILE_BACKUP_FILE, "w") as f:
             json.dump(data, f)
-        logging.info("✅ Data profil lama berhasil disimpan sebelum cloning.")
+        logging.info("✅ Data profil lama disimpan.")
     except Exception as e:
-        logging.error(f"❌ Gagal menyimpan data profil lama: {str(e)}")
+        logging.error(f"❌ Gagal menyimpan backup: {str(e)}")
 
 def load_backup():
-    """Memuat data profil lama."""
+    """Muat data profil lama."""
     if os.path.exists(PROFILE_BACKUP_FILE):
         try:
             with open(PROFILE_BACKUP_FILE, "r") as f:
                 return json.load(f)
         except Exception as e:
-            logging.error(f"❌ Gagal membaca file backup: {str(e)}")
+            logging.error(f"❌ Gagal membaca backup: {str(e)}")
     return None
 
 @client.on(events.NewMessage(pattern="(?i)gclone(?:\s+(.+))?"))
 async def clone_profile(event):
     user_input = event.pattern_match.group(1)
-    
+
     try:
         if event.is_reply:
             reply_message = await event.get_reply_message()
             user = await client.get_entity(reply_message.sender_id)
         elif user_input:
-            if user_input.isdigit():
-                user = await client.get_entity(int(user_input))
-            else:
-                user = await client.get_entity(user_input)
+            user = await client.get_entity(user_input)
         else:
             await event.reply("❌ Tolong reply pesan atau masukkan username/ID!")
             return
 
         logging.info(f"📥 Menyalin profil dari: {user.first_name} ({user.id})")
 
-        # Perbaikan: Ambil profil lengkap dengan `UserFull`
+        # Ambil info lengkap user
         full_user = await client(functions.users.GetFullUserRequest(user.id))
+        user_data = full_user.user  # ✅ FIX: Ambil `user` dari `UserFull`
 
-        # Simpan data profil lama
-        old_profile = full_user  # Simpan objek UserFull
-        old_first_name = old_profile.user.first_name or ""
-        old_last_name = old_profile.user.last_name or ""
-        old_bio = old_profile.about or ""
-
-        old_photos = await client.get_profile_photos("me")
-        old_photo_id = old_photos[0].id if old_photos else None
+        # Simpan data lama sebelum cloning
+        old_user = await client(functions.users.GetFullUserRequest("me"))
+        old_data = old_user.user
 
         save_backup({
-            "first_name": old_first_name,
-            "last_name": old_last_name,
-            "bio": old_bio,
-            "photo_id": old_photo_id
+            "first_name": old_data.first_name or "",
+            "last_name": old_data.last_name or "",
+            "bio": full_user.about or "",
+            "photo": None
         })
 
         # Clone foto profil
@@ -82,27 +75,17 @@ async def clone_profile(event):
             await client(functions.photos.UploadProfilePhotoRequest(file=await client.upload_file(file)))
             logging.info("✅ Foto profil berhasil disalin.")
         else:
-            logging.warning("⚠️ Pengguna tidak memiliki foto profil.")
+            logging.warning("⚠️ Tidak ada foto profil untuk disalin.")
 
-        # Clone bio jika ada
-        about = getattr(full_user, "about", None)  # Perbaikan akses bio
-        if about:
-            await client(functions.account.UpdateProfileRequest(about=about))
-            logging.info("✅ Bio berhasil disalin.")
-        else:
-            logging.warning("⚠️ Pengguna tidak memiliki bio.")
-
-        # Clone nama depan & belakang
-        first_name = user.first_name if user.first_name else ""
-        last_name = user.last_name if hasattr(user, "last_name") and user.last_name else ""
-
+        # Clone nama & bio
         await client(functions.account.UpdateProfileRequest(
-            first_name=first_name,
-            last_name=last_name
+            first_name=user_data.first_name or "",
+            last_name=user_data.last_name or "",
+            about=full_user.about or ""
         ))
-        logging.info("✅ Nama depan dan belakang berhasil disalin.")
+        logging.info("✅ Nama dan bio berhasil disalin.")
 
-        await event.reply(f"✅ Berhasil menyalin profil dari {user.first_name} ({user.id})\n⚠️ *Username tidak bisa di-clone karena bersifat unik!*")
+        await event.reply(f"✅ Berhasil menyalin profil dari {user.first_name} ({user.id})\n⚠️ *Username tidak bisa diclone karena unik!*")
 
     except Exception as e:
         logging.error(f"❌ Gagal menyalin profil: {str(e)}")
@@ -113,36 +96,21 @@ async def unclone_profile(event):
     try:
         backup = load_backup()
         if not backup:
-            await event.reply("⚠️ Tidak ada data profil sebelumnya. Tidak bisa mengembalikan!")
-            logging.warning("⚠️ Tidak ada data profil sebelumnya.")
+            await event.reply("⚠️ Tidak ada data profil sebelumnya!")
             return
 
-        logging.info("🔄 Mengembalikan profil ke sebelum cloning...")
+        logging.info("🔄 Mengembalikan profil...")
 
-        # Kembalikan nama & bio
         await client(functions.account.UpdateProfileRequest(
             first_name=backup["first_name"],
             last_name=backup["last_name"],
             about=backup["bio"]
         ))
-        logging.info("✅ Nama dan bio berhasil dikembalikan.")
+        logging.info("✅ Nama dan bio dikembalikan.")
 
-        # Kembalikan foto profil jika ada
-        if backup["photo_id"]:
-            old_photos = await client.get_profile_photos("me")
-            for photo in old_photos:
-                if photo.id != backup["photo_id"]:
-                    await client(functions.photos.DeletePhotosRequest([photo]))
-            logging.info("✅ Foto profil dikembalikan ke yang sebelumnya.")
-        else:
-            await client(functions.photos.DeletePhotosRequest(await client.get_profile_photos("me")))
-            logging.info("✅ Foto profil dihapus karena sebelumnya tidak ada.")
+        await event.reply("✅ Profil dikembalikan!")
 
-        await event.reply("✅ Profil berhasil dikembalikan ke sebelum cloning!")
-    
-        # Hapus file backup setelah dikembalikan
         os.remove(PROFILE_BACKUP_FILE)
-        logging.info("🗑️ File backup dihapus setelah gunclone.")
 
     except Exception as e:
         logging.error(f"❌ Gagal mengembalikan profil: {str(e)}")
@@ -150,7 +118,7 @@ async def unclone_profile(event):
 
 async def main():
     await client.start(phone=PHONE_NUMBER)
-    logging.info("✅ Bot Telegram siap!")
+    logging.info("✅ Bot siap!")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
