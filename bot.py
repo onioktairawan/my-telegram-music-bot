@@ -14,6 +14,7 @@ PHONE_NUMBER = os.getenv("TELEGRAM_PHONE")
 client = TelegramClient("session", API_ID, API_HASH)
 
 PROFILE_BACKUP_FILE = "profile_backup.json"
+PROFILE_PHOTO_BACKUP = "old_profile.jpg"
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -53,9 +54,7 @@ async def clone_profile(event):
 
         # Ambil info lengkap user
         full_user = await client(functions.users.GetFullUserRequest(target_id))
-
-        # FIX: Ambil data dengan benar
-        user_data = full_user.users[0]  # ✅ Sekarang mengambil `User` yang benar
+        user_data = full_user.users[0]
 
         logging.info(f"📥 Menyalin profil dari: {user_data.first_name} ({user_data.id})")
 
@@ -63,11 +62,17 @@ async def clone_profile(event):
         old_user = await client(functions.users.GetFullUserRequest("me"))
         old_data = old_user.users[0]
 
+        # Simpan foto profil lama
+        old_photos = await client.get_profile_photos("me")
+        if old_photos:
+            await client.download_media(old_photos[0], PROFILE_PHOTO_BACKUP)
+            logging.info("✅ Foto profil lama disimpan.")
+
         save_backup({
             "first_name": old_data.first_name or "",
             "last_name": old_data.last_name or "",
             "bio": old_user.full_user.about or "",
-            "photo": None
+            "photo": PROFILE_PHOTO_BACKUP if old_photos else None
         })
 
         # Clone foto profil
@@ -109,6 +114,14 @@ async def unclone_profile(event):
             about=backup["bio"]
         ))
         logging.info("✅ Nama dan bio dikembalikan.")
+
+        # Kembalikan foto profil jika ada
+        if backup.get("photo") and os.path.exists(backup["photo"]):
+            await client(functions.photos.UploadProfilePhotoRequest(file=await client.upload_file(backup["photo"])))
+            logging.info("✅ Foto profil dikembalikan.")
+        else:
+            await client(functions.photos.DeletePhotosRequest(await client.get_profile_photos("me")))
+            logging.info("✅ Foto profil dihapus karena sebelumnya tidak ada.")
 
         await event.reply("✅ Profil dikembalikan!")
 
