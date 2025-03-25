@@ -44,32 +44,34 @@ async def clone_profile(event):
     try:
         if event.is_reply:
             reply_message = await event.get_reply_message()
-            user = await client.get_entity(reply_message.sender_id)
+            target_id = reply_message.sender_id
         elif user_input:
-            user = await client.get_entity(user_input)
+            target_id = user_input
         else:
             await event.reply("❌ Tolong reply pesan atau masukkan username/ID!")
             return
 
-        logging.info(f"📥 Menyalin profil dari: {user.first_name} ({user.id})")
-
         # Ambil info lengkap user
-        full_user = await client(functions.users.GetFullUserRequest(user.id))
-        user_data = full_user.user  # ✅ FIX: Ambil `user` dari `UserFull`
+        full_user = await client(functions.users.GetFullUserRequest(target_id))
+
+        # FIX: Ambil data dengan benar
+        user_data = full_user.users[0]  # ✅ Sekarang mengambil `User` yang benar
+
+        logging.info(f"📥 Menyalin profil dari: {user_data.first_name} ({user_data.id})")
 
         # Simpan data lama sebelum cloning
         old_user = await client(functions.users.GetFullUserRequest("me"))
-        old_data = old_user.user
+        old_data = old_user.users[0]
 
         save_backup({
             "first_name": old_data.first_name or "",
             "last_name": old_data.last_name or "",
-            "bio": full_user.about or "",
+            "bio": old_user.full_user.about or "",
             "photo": None
         })
 
         # Clone foto profil
-        photos = await client.get_profile_photos(user)
+        photos = await client.get_profile_photos(target_id)
         if photos:
             file = await client.download_media(photos[0], "profile.jpg")
             await client(functions.photos.UploadProfilePhotoRequest(file=await client.upload_file(file)))
@@ -81,11 +83,11 @@ async def clone_profile(event):
         await client(functions.account.UpdateProfileRequest(
             first_name=user_data.first_name or "",
             last_name=user_data.last_name or "",
-            about=full_user.about or ""
+            about=full_user.full_user.about or ""
         ))
         logging.info("✅ Nama dan bio berhasil disalin.")
 
-        await event.reply(f"✅ Berhasil menyalin profil dari {user.first_name} ({user.id})\n⚠️ *Username tidak bisa diclone karena unik!*")
+        await event.reply(f"✅ Berhasil menyalin profil dari {user_data.first_name} ({user_data.id})\n⚠️ *Username tidak bisa diclone karena unik!*")
 
     except Exception as e:
         logging.error(f"❌ Gagal menyalin profil: {str(e)}")
