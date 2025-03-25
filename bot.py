@@ -1,60 +1,49 @@
+from telethon import TelegramClient, events, functions
 import os
-import logging
-import requests
-from telethon import TelegramClient, events
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load konfigurasi dari .env
 load_dotenv()
 
-# Telegram API credentials
-TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID"))
-TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
-TELEGRAM_PHONE = os.getenv("TELEGRAM_PHONE")
-TELEGRAM_CHANNEL_ID = int(os.getenv("TELEGRAM_CHANNEL_ID"))
+API_ID = int(os.getenv("TELEGRAM_API_ID"))
+API_HASH = os.getenv("TELEGRAM_API_HASH")
+PHONE_NUMBER = os.getenv("TELEGRAM_PHONE")
 
-# UltraMSG API credentials
-ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
-ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
-WHATSAPP_TO_NUMBER = os.getenv("WHATSAPP_TO_NUMBER")
+client = TelegramClient("userbot", API_ID, API_HASH)
 
-# Logging setup
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+@client.on(events.NewMessage(pattern="(?i)gclone(?:\s+(.+))?"))
+async def clone_profile(event):
+    user_input = event.pattern_match.group(1)
 
-# Initialize Telegram client
-telegram_client = TelegramClient(TELEGRAM_PHONE, TELEGRAM_API_ID, TELEGRAM_API_HASH)
-
-@telegram_client.on(events.NewMessage(chats=TELEGRAM_CHANNEL_ID))
-async def forward_to_whatsapp(event):
     try:
-        message_text = event.message.message
-        sender = await event.get_sender()
-        sender_name = sender.title if sender else "Unknown Channel"
-        
-        # Format the message
-        formatted_message = f"{sender_name}: {message_text}"
-        
-        # Send message to WhatsApp using UltraMSG
-        url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
-        payload = {
-            "token": ULTRAMSG_TOKEN,
-            "to": WHATSAPP_TO_NUMBER,
-            "body": formatted_message
-        }
-        response = requests.post(url, json=payload)
-        
-        if response.status_code == 200:
-            logging.info(f"Forwarded message from Telegram Channel to WhatsApp: {formatted_message}")
+        if event.is_reply:
+            reply_message = await event.get_reply_message()
+            user = await client.get_entity(reply_message.sender_id)
+        elif user_input:
+            if user_input.isdigit():
+                user = await client.get_entity(int(user_input))
+            else:
+                user = await client.get_entity(user_input)
         else:
-            logging.error(f"Failed to send message. Response: {response.text}")
+            await event.reply("❌ Tolong reply pesan atau masukkan username/ID!")
+            return
+
+        photos = await client.get_profile_photos(user)
+        if photos:
+            file = await client.download_media(photos[0], "profile.jpg")
+            await client(functions.photos.UploadProfilePhotoRequest(file=await client.upload_file(file)))
+
+        about = user.about if user.about else "Tidak ada bio."
+        await client(functions.account.UpdateProfileRequest(about=about))
+
+        first_name = user.first_name if user.first_name else ""
+        last_name = user.last_name if user.last_name else ""
+        await client(functions.account.UpdateProfileRequest(first_name=first_name, last_name=last_name))
+
+        await event.reply(f"✅ Berhasil menyalin profil dari {user.first_name} ({user.id})\n⚠️ *Username tidak bisa di-clone karena bersifat unik!*")
+
     except Exception as e:
-        logging.error(f"Error forwarding message: {str(e)}")
+        await event.reply(f"❌ Gagal menyalin profil: {str(e)}")
 
-async def main():
-    await telegram_client.start()
-    logging.info("Telegram client started.")
-    await telegram_client.run_until_disconnected()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+client.start(phone=PHONE_NUMBER)
+client.run_until_disconnected()
